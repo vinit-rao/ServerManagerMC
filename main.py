@@ -37,8 +37,6 @@ chat_message = None
 chat_lines = []
 MAX_CHAT_LINES = 30
 
-# ANSI Color Codes for Discord
-# Updated ANSI Color Codes for Red Theme
 ANSI_RED = "\u001b[31m"      # Errors & Deaths
 ANSI_WHITE = "\u001b[37m"    # Regular Chat
 ANSI_BRIGHT_RED = "\u001b[1;31m" # Discord User Tags
