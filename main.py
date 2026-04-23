@@ -91,47 +91,43 @@ async def update_chat(formatted_line: str):
 # MC -> Discord Log Reader
 # ----------------------------
 async def tail_minecraft_log():
-    """Reads the Minecraft log file in real-time and updates the chat block."""
     log_path = os.path.join(MC_FOLDER, "logs", "latest.log")
-
     while not os.path.exists(log_path):
         await asyncio.sleep(2)
 
-    with open(log_path, "r", encoding="utf-8") as f:
-        f.seek(0, 2)
+    f = open(log_path, "r", encoding="utf-8")
+    f.seek(0, 2)
 
-        while True:
-            line = f.readline()
-            if not line:
-                await asyncio.sleep(0.5)
+    while True:
+        line = f.readline()
+        if not line:
+            try:
+                # If the file size shrinks, it means Minecraft restarted and made a new log!
+                if os.path.getsize(log_path) < f.tell():
+                    f.close()
+                    f = open(log_path, "r", encoding="utf-8")  # Re-hook to the new file
+            except FileNotFoundError:
+                pass
+            await asyncio.sleep(0.5)
+            continue
+
+        if "[Server thread/INFO]:" in line:
+            clean_line = line.split("[Server thread/INFO]:")[-1].strip()
+            boring_stuff = ["UUID of player", "logged in with entity id", "Preparing spawn area", "Done ("]
+            if any(noise in clean_line for noise in boring_stuff):
                 continue
 
-            if "[Server thread/INFO]:" in line:
-                clean_line = line.split("[Server thread/INFO]:")[-1].strip()
+            color = ANSI_WHITE
+            if clean_line.startswith("<"):
+                color = ANSI_WHITE
+            elif any(x in clean_line for x in [" joined the game", " left the game", "has made the advancement"]):
+                color = ANSI_YELLOW
+            elif clean_line.startswith("[Discord]"):
+                continue
+            elif not clean_line.startswith("["):
+                color = ANSI_RED
 
-                # Filter out boring server noises
-                boring_stuff = ["UUID of player", "logged in with entity id", "Preparing spawn area", "Done ("]
-                if any(noise in clean_line for noise in boring_stuff):
-                    continue
-
-                # --- COLOR FILTERING ENGINE ---
-                color = ANSI_RESET
-
-                # 1. Player Chat (starts with <Username>)
-                if clean_line.startswith("<"):
-                    color = ANSI_RESET
-                    # 2. Server Events (Joins, Leaves, Advancements)
-                elif any(x in clean_line for x in [" joined the game", " left the game", "has made the advancement"]):
-                    color = ANSI_YELLOW
-                # 3. Discord Messages echoing in log
-                elif clean_line.startswith("[Discord]"):
-                    continue  # Skip these so we don't double-print Discord messages
-                # 4. Death Messages (No brackets, just text like "Steve fell from a high place")
-                elif not clean_line.startswith("["):
-                    color = ANSI_RED
-
-                # Update the chat UI
-                await update_chat(f"{color}{clean_line}{ANSI_RESET}")
+            await update_chat(f"{color}{clean_line}{ANSI_RESET}")
 
 
 @bot.event
@@ -234,14 +230,43 @@ async def help(ctx):
 
 @bot.command()
 async def startserver(ctx):
-    await update_terminal(f"[{ctx.author.name}] initiated server boot sequence...")
+    await update_terminal(f"[{ctx.author.name}] starting server...")
     try:
+        # 1. Prevent double-starts that break the chat bridge
+        check_screen = subprocess.run(['screen', '-ls', SCREEN_NAME], capture_output=True, text=True)
+        if "Detached" in check_screen.stdout or "Attached" in check_screen.stdout:
+            await update_terminal(
+                f"{ANSI_YELLOW}>> WARNING: Server is already running. You must stop it first.{ANSI_RESET}")
+            return
+
+        # 2. Read what is inside version.txt
+        version_file = os.path.join(MC_FOLDER, "version.txt")
+        current_version = "Unknown"
+        if os.path.exists(version_file):
+            with open(version_file, "r") as f:
+                current_version = f.read().strip()
+
+        # 3. Dynamically update the MOTD in server.properties
+        prop_file = os.path.join(MC_FOLDER, "server.properties")
+        if os.path.exists(prop_file):
+            with open(prop_file, "r") as f:
+                lines = f.readlines()
+            with open(prop_file, "w") as f:
+                for line in lines:
+                    if line.startswith("motd="):
+                        # Injects the version variable into the red theme description!
+                        f.write(
+                            f"motd=\\u00A74\\u00A7l\\u00BB \\u00A7c\\u00A7lvinitrao.com \\u00A74\\u00A7l\\u00AB\\u00A7r \\n\\u00A77Current Version: \\u00A7c{current_version}\\u00A7r\n")
+                    else:
+                        f.write(line)
+
+        # 4. Boot the server
         command = ['screen', '-dmS', SCREEN_NAME, 'java', f'-Xmx{MAX_RAM}', '-jar', SERVER_JAR, 'nogui']
         subprocess.run(command, cwd=MC_FOLDER, check=True)
-        await update_terminal(">> SUCCESS: Server is starting in the background.")
-        await update_chat(f"{ANSI_GREEN}>> Server is starting up...{ANSI_RESET}")
+        await update_terminal(f"{ANSI_GREEN}>> SUCCESS: Server starting.{ANSI_RESET}")
+
     except Exception as e:
-        await update_terminal(f">> ERROR: Failed to start server. ({e})")
+        await update_terminal(f"{ANSI_RED}>> ERROR: {e}{ANSI_RESET}")
 
 
 @bot.command()
