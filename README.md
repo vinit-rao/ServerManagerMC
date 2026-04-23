@@ -54,4 +54,6 @@ chat-mc*
 
 Also make sure the bot has administrator perms*
 
-If you did everything correctly it should work if not email me I may have left some info out I can help. :)
+
+
+BTW u need to know how to do port forwarding and all that other stuff so just this wont be enought to have the server setup btw.
